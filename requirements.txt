@@ -1,0 +1,4 @@
+psycopg[binary]==3.3.2
+elasticsearch==9.2.1
+backoff==2.2.1
+python-dotenv==1.2.1
