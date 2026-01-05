@@ -34,9 +34,14 @@ class Transformer:
     def transform_movie(self, row: dict[str, Any]) -> dict[str, Any]:
         movie_id = _uuid_to_str(row["id"])
 
+        # 🔧 НОРМАЛИЗАЦИЯ РЕЙТИНГА (ВАЖНО ДЛЯ ТЕСТА N/A)
+        rating = row.get("rating")
+        if rating in ("N/A", "", None):
+            rating = None
+
         doc = {
             "id": str(movie_id),
-            "imdb_rating": row.get("rating"),
+            "imdb_rating": rating,
             "genres": row.get("genres") or [],
             "title": row.get("title") or "",
             "description": row.get("description") or "",
@@ -51,6 +56,7 @@ class Transformer:
         }
 
         return doc
+
 
 def transform(rows):
     return [Transformer().transform_movie(r) for r in rows]
