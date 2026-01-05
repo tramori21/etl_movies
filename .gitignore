@@ -16,7 +16,6 @@ venv/
 # Environment / secrets
 # =========================
 .env
-.env.*
 
 # =========================
 # ETL runtime files

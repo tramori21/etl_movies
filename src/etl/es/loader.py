@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Iterable
 
@@ -11,17 +11,19 @@ class ElasticsearchLoader:
         self.es = es
         self.index_name = index_name
 
+        if not self.es.indices.exists(index=self.index_name):
+            self.es.indices.create(index=self.index_name)
+
     def load(self, docs: Iterable[dict[str, Any]]) -> int:
-        actions = []
-        for doc in docs:
-            actions.append(
-                {
-                    "_op_type": "index",
-                    "_index": self.index_name,
-                    "_id": doc["id"],
-                    "_source": doc,
-                }
-            )
+        actions = [
+            {
+                "_op_type": "index",
+                "_index": self.index_name,
+                "_id": doc["id"],
+                "_source": doc,
+            }
+            for doc in docs
+        ]
 
         if not actions:
             return 0

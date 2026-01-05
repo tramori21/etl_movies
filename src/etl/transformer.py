@@ -51,3 +51,6 @@ class Transformer:
         }
 
         return doc
+
+def transform(rows):
+    return [Transformer().transform_movie(r) for r in rows]

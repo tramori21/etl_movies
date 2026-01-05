@@ -1,14 +1,14 @@
-services:
+﻿services:
   postgres:
     image: postgres:16
-    environment:
-      POSTGRES_DB: movies_database
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
+    env_file:
+      - ./.env
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./dump.sql:/docker-entrypoint-initdb.d/01_dump.sql:ro
+
 
   elasticsearch:
     image: elasticsearch:7.17.17
@@ -29,10 +29,12 @@ services:
     working_dir: /app
     volumes:
       - .:/app
+    env_file:
+      - ./.env
     depends_on:
       - postgres
       - elasticsearch
-    command: sleep infinity
+    command: python -m src.etl.main
 
 volumes:
   pgdata:

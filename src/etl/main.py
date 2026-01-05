@@ -1,82 +1,74 @@
-from __future__ import annotations
-
-import logging
-import os
-import time
+﻿from time import sleep
 from datetime import datetime, timezone
 
-import backoff
+import psycopg
 from elasticsearch import Elasticsearch
 
-from src.etl.es.index_manager import IndexManager
-from src.etl.es.loader import ElasticsearchLoader
-from src.etl.pg.extractor import PostgresExtractor
-from src.etl.state.state import State
-from src.etl.transformer import Transformer
-
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("etl")
-
-PG_DSN = (
-    "dbname=movies_database "
-    "user=app "
-    "password=app "
-    "host=postgres "
-    "port=5432 "
-    "connect_timeout=5"
-)
-
-ES_URL = "http://elasticsearch:9200"
-INDEX = "movies"
-SCHEMA_PATH = "src/etl/es/es_schema.json"
-
-STATE_PATH = "data/state.json"
-STATE_KEY = "last_modified"
-
-POLL_SECONDS = int(os.getenv("POLL_SECONDS", "10"))
+from etl.config import settings
+from etl.state.json_file_storage import JsonFileStorage
+from etl.state.state import State
+from etl.pg.extractor import PostgresExtractor
+from etl.es.loader import ElasticsearchLoader
+from etl.transformer import transform
 
 
-@backoff.on_exception(backoff.expo, Exception, max_time=60)
-def run_once(state: State) -> int:
-    es = Elasticsearch(ES_URL)
-    IndexManager(es, INDEX, SCHEMA_PATH).ensure_index()
-
-    last = state.get(STATE_KEY)
-    if last:
-        last_dt = datetime.fromisoformat(last)
-    else:
-        last_dt = datetime.min.replace(tzinfo=timezone.utc)
-
-    extractor = PostgresExtractor(PG_DSN)
-    transformer = Transformer()
-
-    rows = extractor.fetch_movies(last_dt)
-    if not rows:
-        return 0
-
-    docs = [transformer.transform_movie(r) for r in rows]
-
-    loader = ElasticsearchLoader(es, INDEX)
-    loaded = loader.load(docs)
-
-    max_updated = max(r["modified"] for r in rows)
-    if max_updated.tzinfo is None:
-        max_updated = max_updated.replace(tzinfo=timezone.utc)
-
-    state.set(STATE_KEY, max_updated.isoformat())
-    return loaded
+def wait_for_postgres(dsn: str) -> None:
+    while True:
+        try:
+            with psycopg.connect(dsn):
+                print("Postgres is ready", flush=True)
+                return
+        except psycopg.OperationalError:
+            print("Waiting for Postgres...", flush=True)
+            sleep(2)
 
 
-def main():
-    state = State(STATE_PATH)
+def wait_for_elasticsearch(es: Elasticsearch) -> None:
+    while True:
+        try:
+            if es.ping():
+                print("Elasticsearch is ready", flush=True)
+                return
+        except Exception:
+            pass
+        print("Waiting for Elasticsearch...", flush=True)
+        sleep(2)
+
+
+def main() -> None:
+    print("ETL started", flush=True)
+
+    wait_for_postgres(settings.pg_dsn)
+
+    es = Elasticsearch(settings.es_host)
+    wait_for_elasticsearch(es)
+
+    storage = JsonFileStorage(settings.state_path)
+    state = State(storage)
+
+    extractor = PostgresExtractor(settings.pg_dsn)
+    loader = ElasticsearchLoader(es, settings.index_name)
 
     while True:
-        loaded = run_once(state)
-        logger.info("Loaded: %s", loaded)
-        time.sleep(POLL_SECONDS)
+        last = state.get(settings.state_key)
+        last_dt = datetime.fromisoformat(last) if last else datetime.min.replace(tzinfo=timezone.utc)
+
+        rows = extractor.fetch_movies(last_dt)
+
+        if rows:
+            docs = transform(rows)
+            loader.load(docs)
+
+            max_modified = max(r["modified"] for r in rows)
+            if max_modified.tzinfo is None:
+                max_modified = max_modified.replace(tzinfo=timezone.utc)
+
+            state.set(settings.state_key, max_modified.isoformat())
+            print(f"Loaded {len(rows)} movies", flush=True)
+        else:
+            print("No new movies", flush=True)
+
+        sleep(10)
 
 
 if __name__ == "__main__":
